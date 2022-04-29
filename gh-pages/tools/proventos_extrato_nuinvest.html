@@ -1,0 +1,122 @@
+<html>
+<head>
+</head>
+
+<body>
+<form name="csv" method="post" onsubmit="return false" accept-charset="utf-8">
+  <textarea rows="10" cols="80" name="content">Insira o conteúdo CSV do seu extrato
+anual da NuInvest aqui. (substitua todo o texto)
+</textarea>
+  <br /><br /><br />
+  <button onclick="process.bind(this.form)(event)">Processar</button>
+</form>
+<script type="text/javascript">
+(function (w, d) {
+    function *iterateRows(txt) {
+        const l = txt.length
+        let p1 = 0, p2 = 0
+        do {
+            p2 = txt.indexOf('\n', p1)
+            if (p2 === -1 && p1 < l) p2 = l
+            if (p2 !== -1) yield txt.substr(p1, p2 - p1)
+            p1 = p2 + 1
+        } while (p2 !== -1)
+    }
+    function partsOf(txt, sep) {
+        let list = txt.split(sep)
+        let p = 0
+        while (p < list.length) {
+            let v = list[p]
+            let d = v.substr(0, 1)
+            if (/['"]/.test(d)) {
+                while (!v.endsWith(d) && p < list.length-1) {
+                    v = [v, list[p+1]].join(sep)
+                    list.splice(p, 2, v)
+                }
+                v = v.endsWith(d) ? v.substr(1, v.length - 2) : v.substr(1)
+                list[p] = v
+            }
+            p += 1
+        }
+        return list
+    }
+    function *readCsv(csv) {
+        const rows = iterateRows(csv)
+        let sep=';'
+        let row = rows.next().value
+        if (row.startsWith('sep=')) {
+            sep = row.substr(4, 1) || sep
+            row = rows.next().value
+        }
+        const keys = partsOf(row, sep)
+        while (row = rows.next().value) {
+            let values = partsOf(row, sep)
+            let result = {}
+            for (let i = 0; i < keys.length; i++) {
+                result[keys[i]] = values[i]
+            }
+            yield result
+        }
+    }
+    function toDecimal(sValue) {
+        return parseFloat((sValue || '0,0').replace(/\./g, '').replace(',', '.'))
+    }
+    function buildSummary() {
+        return {
+            RENDIMENTO: 0.0,
+            DIVIDENDOS: 0.0,
+            JSCP: 0.0,
+            AMORTIZACAO: 0.0,
+        }
+    }
+    function findHeader(regex, row, default_value){
+        for (let header in row) {
+            if (regex.test(header)) return header
+        }
+        return default_value
+    }
+    function nuInvestSummary(csv) {
+        const rows = readCsv(csv)
+        let row, result = {}
+        while (row = rows.next().value) {
+            const hist = findHeader(/^Hist.rico/, row, 'Histórico'), amount = findHeader(/^Lan.amento/, row, 'Lançamento')
+            let descr = (row[hist] || '').replace(/\s\s+/g, ' ')
+            let parts = descr.match(/\S+/g)
+            let ticker = '', part = ''
+            if (descr.indexOf('RENDIMENTO') !== -1) {
+                ticker = parts[parts.length - 3]
+                part = 'RENDIMENTO'
+            } else
+            if (descr.indexOf('DIVIDENDOS') !== -1) {
+                ticker = parts[parts.length - 1]
+                part = 'DIVIDENDOS'
+            } else
+            if (descr.indexOf('JUROS S/ CAPITAL') !== -1) {
+                ticker = parts[parts.length - 1]
+                part = 'JSCP'
+            } else
+            if (descr.indexOf('AMOTIZACAO') !== -1 || descr.indexOf('AMORTIZACAO') !== -1) {
+                ticker = parts[parts.length - 1]
+                part = 'AMORTIZACAO'
+            }
+            if (!result[ticker]) result[ticker] = buildSummary()
+            result[ticker][part] += toDecimal(row[amount])
+        }
+        return result
+    }
+    w.process = function (e) {
+        const result = nuInvestSummary(this.content.value)
+        const rows = []
+        for (let key in buildSummary()) {
+            for (let ticker in result) {
+                if (result[ticker][key] > 0.0) {
+                    rows.push([key, ticker, result[ticker][key].toFixed(2), result[ticker][key]].join('\t'))
+                }
+            }
+        }
+        this.content.value = rows.sort().join('\n')
+    }
+})(window, document)
+</script>
+</body>
+</html>
